@@ -18,3 +18,10 @@ Deaths in year y, age group i:
  N_deaths_y_i ~ Poisson (lambda_y_i)
  log(lambda_y_i) = log(pop_y_i) + alpha_i +beta1_i*t + beta2_i*ind2020
  beta1_i ~dnorm(rho1*beta1_(i-1), tau) 
+ 
+```{r}
+a1 <- readRDS('./Data/all_cause_deaths_age_race_year.rds')
+
+```
+ 
+ 
