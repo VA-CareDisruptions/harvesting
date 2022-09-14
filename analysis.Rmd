@@ -6,6 +6,11 @@ date: '2022-09-14'
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tidyr)
+library(MASS)
+library(lubridate)
+library(rjags)
+library(INLA)
 ```
 Interesting questions: competing risks: a lot of people died during covid; at some point we should see a decline in overall death rates below baseline because of this 'harvesting' effect. in which groups will this be most apparent?
 https://www.bmj.com/content/373/bmj.n1137
@@ -20,8 +25,119 @@ Deaths in year y, age group i:
  beta1_i ~dnorm(rho1*beta1_(i-1), tau) 
  
 ```{r}
-a1 <- readRDS('./Data/all_cause_deaths_age_race_year.rds')
+a1 <- readRDS('./Data/all_cause_deaths_age_race_sex_year.rds')
+#Uses age recode 27
+#https://www.cdc.gov/nchs/data/dvs/Multiple-Cause-Record-Layout-2020.pdf 
+
+a2 <- a1 %>%
+  group_by(agey,race_recode, month, year,sex) %>%
+  mutate(agey = if_else(agey>85,85, agey)) %>%
+  filter(agey !=999) %>%
+  summarize(N_deaths=sum(N_deaths)) %>%
+  ungroup() %>%
+    tidyr::complete(agey,race_recode, month, year,sex, fill=list(N_deaths=0)) %>% #fills 0s
+  mutate(date=as.Date(paste(year, month, '01', sep='-'), format='%Y-%m-%d'),
+    agec = if_else(agey<35,1,
+           if_else( agey<45,2,
+           if_else( agey<55,3,
+           if_else( agey<65,4,
+           if_else( agey<75,5,
+           if_else( agey<85,6,7                          ))))))
+  )
+
+
+pop1 <- readRDS('./Data/pop_interpol_single_age.rds')
+
+a3 <- full_join(a2, pop1, by=c('agey','sex','race_recode','date')) %>%
+  mutate(    agec = as.factor(agec),
+    race_recode= as.factor(race_recode)
+    ) %>%
+  filter( !is.na(pop.interpol) & !is.na(pop.interpol) & year >= 2014) %>%
+  mutate(N_deaths = if_else(is.na(N_deaths),0, N_deaths),
+         month=as.factor(month(date)),
+         pandemic_period= if_else(date>='2020-03-01',1,0),
+         year= year(date))
+```
+
+  
+   RACE_RECODE: 
+    1=Non-Hispanic White
+   2=Non-Hispanic- Black
+   3= Hispanic
+   4=American Indian/Native Alaskan
+   5= Asian/Pacific Island
+   999=Missing
+```{r}
+
+mod1 <- glm.nb(N_deaths ~ pandemic_period*race_recode + 
+              pandemic_period*sex + 
+              year + 
+              month + 
+              pandemic_period*agec + 
+              offset(log(pop.interpol)),  data=a3  )
+
+summary(mod1)
+
 
 ```
+
+```{r}
+
+mod.mat <- model.matrix(~ pandemic_period + race_recode + agey +sex, data=a3)
+
+model_string <- "
+model{
+for(t in 1:N_times){ 
+  N_deaths[t] ~ dpois(lambda[t])
+  
+  log(lambda[t]) <- ( int )
+  
+  }
+   int ~ dnorm(0, 1e-4)
+   
+ }
+"
+##############################################################
+#Model Fitting
+##############################################################
+inits1=list(".RNG.seed"=c(123), ".RNG.name"='base::Wichmann-Hill')
+inits2=list(".RNG.seed"=c(456), ".RNG.name"='base::Wichmann-Hill')
+inits3=list(".RNG.seed"=c(789), ".RNG.name"='base::Wichmann-Hill')
+##############################################
+#Model Organization
+##############################################
+model_spec<-textConnection(model_string)
+model_jags<-jags.model(model_spec, 
+                       inits=list(inits1,inits2, inits3),
+                       data=list('N_deaths'=a3$N_deaths ,
+                                 'N_times'=nrow(a3) 
+                                    ),
+                       n.adapt=10000, 
+                       n.chains=3)
+params<-c('lambda', 'beta','epsilon', 'rho3','tau3.beta', 'int')
+##############################################
+#Posterior Sampling
+##############################################
+posterior_samples<-coda.samples(model_jags, 
+                                params, 
+                                n.iter=10000)
+posterior_samples.all<-do.call(rbind,posterior_samples)
+#post1.summary<-summary(posterior_samples)
+#post_means<-colMeans(posterior_samples.all)
+post_means<-apply(posterior_samples.all, 2, mean)
+sample.labs<-names(post_means)
+ci<-t(hdi(posterior_samples.all, credMass = 0.95))
+#ci<-matrix(sprintf("%.1f",round(ci,1)), ncol=2)
+ci<-matrix(ci, ncol=2)
+row.names(ci)<-sample.labs
+#post_means<-sprintf("%.1f",round(post_means,1))
+names(post_means)<-sample.labs
+indices <- str_extract_all(names(post_means), "(?<=\\[).+?(?=\\])")
+rep1 <- sapply(indices, function(x) identical(x, character(0))) #is it missing ie character(0)
+indices[which(rep1==1)] <- '999'
+
+```
+
+
  
  

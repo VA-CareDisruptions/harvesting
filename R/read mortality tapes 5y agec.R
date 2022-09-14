@@ -12,8 +12,12 @@ library(cdlTools)
 
 #the geographic resolution missing from the public data
 
+#https://www.cdc.gov/nchs/nvss/bridged_race/data_documentation.htm
 
+#Bridged-Race Population Estimates – Data Files and Documentation
 #https://www.cdc.gov/nchs/data_access/vitalstatsonline.htm
+
+
 #file.names1<- list('VS14MORT.DUSMCPUB','VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB','VS17MORT.DUSMCPUB','Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304','VS20MORT.DUSMCPUB_r20220105')
 file.names1<- list('MULT2014.USAllCnty.txt','MULT2015.USAllCnty.txt','MULT2016.USAllCnty.txt','MULT2017.USAllCnty.txt','Mort2018US.AllCnty.txt','MULT2019US.AllCnty.txt','MULT2020.USAllCnty.txt')
 
@@ -60,8 +64,26 @@ df1$race_recode[is.na(df1$race_recode)] <- 999
 #4-American Indian/Native Alaskan
 #5: Asian/Pacific Island
 
-df2 <- df1 %>%
-  group_by(agec_5y, race_recode, month,year) %>%
-  summarize(N_deaths=n())
 
-saveRDS(df2,'./Data/all_cause_deaths_age_race_year.rds')
+df1$agey <- as.numeric(df1$age_detail_number)
+df1$agey[df1$age_detail_class==2] <- as.numeric(df1$age_detail_number[df1$age_detail_class==2] )/12
+df1$agey[df1$age_detail_class==4] <- as.numeric(df1$age_detail_number[df1$age_detail_class==4] )/365
+df1$agey[df1$age_detail_class==5] <- as.numeric(df1$age_detail_number[df1$age_detail_class==5] )/365/24
+df1$agey[df1$age_detail_class==6] <- as.numeric(df1$age_detail_number[df1$age_detail_class==6] )/365/24/60
+
+
+#RACE RECODE:
+#1=Non-Hispanic White
+#2=Non-Hispanic- Black
+#3= Hispanic
+#4-American Indian/Native Alaskan
+#5: Asian/Pacific Island
+
+df2 <- df1 %>%
+  mutate(agey =round(agey)) %>%
+  group_by(agey,agec_5y, race_recode, sex, month,year) %>%
+  summarize(N_deaths=n()) %>%
+  ungroup()
+
+saveRDS(df2,'./Data/all_cause_deaths_age_race_sex_year.rds')
+
