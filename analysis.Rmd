@@ -1,0 +1,20 @@
+---
+title: "analysis"
+output: html_document
+date: '2022-09-14'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Interesting questions: competing risks: a lot of people died during covid; at some point we should see a decline in overall death rates below baseline because of this 'harvesting' effect. in which groups will this be most apparent?
+https://www.bmj.com/content/373/bmj.n1137
+
+Kissler and Grad: https://academic.oup.com/aje/article/191/8/1519/6572389
+
+Analysis idea; define excess death rate by 5 year age bin. (e.g., simple approach, annual incidence in previous year vs 2020 with trend adjustment; annual deaths; use bayesian model)
+
+Deaths in year y, age group i:
+ N_deaths_y_i ~ Poisson (lambda_y_i)
+ log(lambda_y_i) = log(pop_y_i) + alpha_i +beta1_i*t + beta2_i*ind2020
+ beta1_i ~dnorm(rho1*beta1_(i-1), tau) 
