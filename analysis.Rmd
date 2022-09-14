@@ -118,9 +118,11 @@ for(t in 1:N_times){
 }
   
   beta[1] ~ dnorm(0, (1-rho^2)*tau.beta)
+  baseline_prob[1] <- beta[1] +int
   
   for(i in 2:86){
       beta[i] ~ dnorm(rho*beta[i-1], tau.beta) #AR(1) model
+      baseline_prob[i] <- beta[i] +int
   }
   
   delta[1] ~ dnorm(0, (1-rho2^2)*tau.delta)
@@ -215,6 +217,14 @@ ggplot(post_delta, aes(x=index_n, y=(post_means))) +
     xlab('Age (years)') +
   ylab('log-Pandemic effect')
 
+
+ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
+  theme_classic() +
+  geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
+  geom_line()+
+  ggtitle('Pandemic effect (RR) by Age') +
+    xlab('Age (years)') +
+  ylab('Pandemic effect (RR')
 ```
  
  
