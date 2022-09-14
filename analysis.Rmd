@@ -163,7 +163,7 @@ model_jags<-jags.model(model_spec,
                        n.adapt=10000, 
                        n.chains=3)
 
-params<-c('lambda', 'beta','delta','rho','tau.beta','int')
+params<-c( 'beta','delta','rho','tau.beta','int','baseline_prob')
 ##############################################
 #Posterior Sampling
 ##############################################
@@ -171,6 +171,12 @@ posterior_samples<-coda.samples(model_jags,
                                 params, 
                                 n.iter=10000)
 posterior_samples.all<-do.call(rbind,posterior_samples)
+
+saveRDS(posterior_samples.all, './Results/posteriors.rds')
+```
+
+
+```{r}
 #post1.summary<-summary(posterior_samples)
 #post_means<-colMeans(posterior_samples.all)
 post_means<-apply(posterior_samples.all, 2, mean)
@@ -194,6 +200,8 @@ post_beta<- as.data.frame(combined[grep('beta',names(post_means)),]) %>%
 post_delta<- as.data.frame(combined[grep('delta',names(post_means)),]) %>%
   filter(index_n<=85)
 
+post_baseline_prob<- as.data.frame(combined[grep('baseline_prob',names(post_means)),]) 
+
 # ggplot(post_beta, aes(x=index_n, y=exp(post_means))) +
 #   theme_classic() +
 #   geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
@@ -201,22 +209,21 @@ post_delta<- as.data.frame(combined[grep('delta',names(post_means)),]) %>%
 #   ggtitle('Mortality ratio by Age') +
 #     xlab('Age (years)')
 
-ggplot(post_beta, aes(x=index_n, y=(post_means))) +
+ggplot(post_baseline_prob, aes(x=index_n, y=(post_means))) +
   theme_classic() +
   geom_ribbon(aes(x=index_n, ymin=(`1`), ymax=(`2`)),fill='gray80') +
   geom_line()+
-  ggtitle('Log-Mortality ratio by Age') +
+  ggtitle('Log-Deaths/100000 per quarter') +
     xlab('Age (years)')
 
 
-ggplot(post_delta, aes(x=index_n, y=(post_means))) +
+ggplot(post_baseline_prob, aes(x=index_n, y=exp(post_means))) +
   theme_classic() +
-  geom_ribbon(aes(x=index_n, ymin=(`1`), ymax=(`2`)),fill='gray80') +
+  geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
   geom_line()+
-  ggtitle('Log-Pandemic effect ratio by Age') +
+  ggtitle('Pre-pandemic rate of death') +
     xlab('Age (years)') +
-  ylab('log-Pandemic effect')
-
+  ylab('Deaths/100000 per quarter')
 
 ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
   theme_classic() +
@@ -225,6 +232,7 @@ ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
   ggtitle('Pandemic effect (RR) by Age') +
     xlab('Age (years)') +
   ylab('Pandemic effect (RR')
+
 ```
  
  
