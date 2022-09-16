@@ -92,8 +92,11 @@ summary(mod1)
 
 b1 <- a3 %>%
   mutate(qtr=as.factor(quarter(date))) %>%
-  group_by(qtr,pandemic_period, agey) %>%
-  summarize(N_deaths=sum(N_deaths), pop=sum(pop.interpol)) %>%
+  group_by(year,month,qtr,pandemic_period, agey) %>%
+    summarize(N_deaths=sum(N_deaths), pop=sum(pop.interpol)) %>% 
+  ungroup() %>%
+  group_by(year,qtr,pandemic_period, agey) %>%
+  summarize(N_deaths=sum(N_deaths), pop=mean(pop)) %>% # for the quarters, take mean so don't double count people
   mutate(log.offset=log(pop/100000))
 
 mod.test <- glm(N_deaths ~ offset(log.offset) +agey, data=b1, family='poisson')
@@ -101,7 +104,7 @@ mod.test <- glm(N_deaths ~ offset(log.offset) +agey, data=b1, family='poisson')
 
 
 
-```{r}
+```{r, eval=F}
 
 mod.mat <- model.matrix(~ agey +pandemic_period +qtr, data=b1)
 
@@ -113,7 +116,12 @@ for(t in 1:N_times){
   
   #N_deaths[t] ~ dpois(lambda[t])
   
-  log(lambda[t]) <- ( int  + log.offset[t] + beta[agey[t]+1] + pandemic[t]*delta[agey[t]+1] )
+  log(lambda[t]) <- ( int  + 
+  log.offset[t] + #offset
+  beta[agey[t]+1] + #age-specific intercept
+  pandemic[t]*delta[agey[t]+1] + #age specific pandemic effect 
+  epsilon[agey[t]+1]*t #age specific trend
+  )
 
 }
   
@@ -128,15 +136,23 @@ for(t in 1:N_times){
   delta[1] ~ dnorm(0, (1-rho2^2)*tau.delta)
     for(i in 2:86){
       delta[i] ~ dnorm(rho2*delta[i-1], tau.delta) #AR(1) model
+    }
+  
+    
+  epsilon[1] ~ dnorm(0, (1-rho3^2)*tau.epsilon)
+    for(i in 2:86){
+      epsilon[i] ~ dnorm(rho2*epsilon[i-1], tau.epsilon) #AR(1) model
   }
   
    int ~ dnorm(0, 1e-4)
    
    tau.beta~ dgamma(3, 2)
    tau.delta~ dgamma(3,2)
+   tau.epsilon~ dgamma(3,2)
 
    rho ~ dunif(-1,1)
    rho2 ~ dunif(-1,1)
+   rho3 ~ dunif(-1,1)
    
     r ~ dunif(0,250)
 
@@ -163,7 +179,7 @@ model_jags<-jags.model(model_spec,
                        n.adapt=10000, 
                        n.chains=3)
 
-params<-c( 'beta','delta','rho','tau.beta','int','baseline_prob')
+params<-c( 'beta','delta','epsilon','rho','tau.beta','int','baseline_prob')
 ##############################################
 #Posterior Sampling
 ##############################################
@@ -177,6 +193,8 @@ saveRDS(posterior_samples.all, './Results/posteriors.rds')
 
 
 ```{r}
+posterior_samples.all <- readRDS( './Results/posteriors.rds')
+
 #post1.summary<-summary(posterior_samples)
 #post_means<-colMeans(posterior_samples.all)
 post_means<-apply(posterior_samples.all, 2, mean)
@@ -198,6 +216,9 @@ post_beta<- as.data.frame(combined[grep('beta',names(post_means)),]) %>%
   filter(index_n<=85)
 
 post_delta<- as.data.frame(combined[grep('delta',names(post_means)),]) %>%
+  filter(index_n<=85)
+
+post_epsilon<- as.data.frame(combined[grep('epsilon',names(post_means)),]) %>%
   filter(index_n<=85)
 
 post_baseline_prob<- as.data.frame(combined[grep('baseline_prob',names(post_means)),]) 
@@ -231,7 +252,89 @@ ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
   geom_line()+
   ggtitle('Pandemic effect (RR) by Age') +
     xlab('Age (years)') +
-  ylab('Pandemic effect (RR')
+  ylab('Pandemic effect (RR')+
+    geom_hline(yintercept=1)
+
+
+
+ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
+  theme_classic() +
+  geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
+  geom_line()+
+  ggtitle('Time trend by Age') +
+    xlab('Age (years)') +
+  geom_hline(yintercept=1)+
+  ylab('RR per quarter')
+
+
+```
+
+
+## Competing risks
+People can die from COVID, or they can die from something else. Probability of detah from something else can be determined from baseline death rate
+
+start with N people, each quarter, probability of being alive is (1-P_die) for 3 quarters it (1-P_die)^3 
+```{r}
+
+P_die_qtr_base <- exp(7.5302187)/100000 # probability an 84 year old dies in a quarter
+
+RR_Pandemic <- exp(0.164847030)
+
+P_die_qtr_pandemic <- P_die_qtr_base*RR_Pandemic
+
+P_die_virus <- P_die_qtr_pandemic - P_die_qtr_base #Prob excess deaths; most of which are virus
+
+P_die_year <- 1 - (1 - P_die_qtr_base)^4 #0.072 pretty close to government estimate of 0.064 for women and 0.085 for men https://www.ssa.gov/oact/STATS/table4c6.html#fn1
+
+P_die_pandemic <- 1 - (1 - P_die_qtr_pandemic)^4
+
+
+#Category 1= alive
+
+#Category 2= die covid
+
+#Category 3= die other
+
+#Start with a cohort of 1000
+
+t <- 1:40 #  10 years of quarterly data
+
+Alive <- rep(NA, length(t))
+Die_COVID <- rep(NA, length(t))
+Die_Other <- rep(NA, length(t))
+
+Alive[1] <- 1000
+Die_COVID[1] <- 0
+Die_Other[1] <- 0
+
+for(i in 2:length(t)) {
+  
+  Alive[i] <- Alive[i-1] - Alive[i-1] * P_die_qtr_base  - Alive[i-1] * P_die_virus
+  Die_COVID[i] <- Die_COVID[i-1] + Alive[i-1] * P_die_virus #cumulative deaths covid
+  Die_Other[i] <- Die_Other[i-1] + Alive[i-1] * P_die_qtr_base #cumulative deaths other
+
+}
+
+```
+ 
+ It might make sense to focus in on people with certain conditions, like cancer; diabetes; etc
+ 
+```{r}
+#should be 282,801 diabetes deaths in US in 2019 according to CDC wonderi in E10-E14
+d1 <- readRDS('./Data/diabetes_covid_deaths_line_list_no_geo.rds')
+
+ d1 %>%
+  filter(year==2019) %>%
+  summarize(N_diabetes=sum(diabetes))
+
+summary1 <- d1 %>%
+  group_by(age_group,race_recode,year) %>%
+  filter(year %in% c(2019,2020)) %>%
+  summarize(diabetes=sum(diabetes), covid_diabetes=sum(covid_diabetes)) %>%
+  reshape2::dcast( race_recode +age_group ~ year, value.var='diabetes') %>%
+  mutate(ratio=`2020`/`2019`)
+  
+#View(summary1)
 
 ```
  
