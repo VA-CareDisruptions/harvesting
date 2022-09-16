@@ -317,16 +317,19 @@ for(i in 2:length(t)) {
 
 ```
  
- It might make sense to focus in on people with certain conditions, like cancer; diabetes; etc
+ It might make sense to focus in on people with certain conditions, like cancer; diabetes; etc.
+ Need prevalence info by age and ethnicity; could get from the VA
  
 ```{r}
 #should be 282,801 diabetes deaths in US in 2019 according to CDC wonderi in E10-E14
 d1 <- readRDS('./Data/diabetes_covid_deaths_line_list_no_geo.rds')
 
  d1 %>%
-  filter(year==2019) %>%
-  summarize(N_diabetes=sum(diabetes))
+  filter(year %in% c(2019,2020)) %>%
+   group_by(year) %>%
+  summarize(N_diabetes=sum(diabetes), N_covid_diabetes=sum(covid_diabetes))
 
+ 
 summary1 <- d1 %>%
   group_by(age_group,race_recode,year) %>%
   filter(year %in% c(2018,2019,2020)) %>%
@@ -334,7 +337,7 @@ summary1 <- d1 %>%
   reshape2::dcast( race_recode +age_group ~ year, value.var='diabetes') %>%
   mutate(ratio20_19=`2020`/`2019`, ratio19_18=`2019`/`2018`)
   
-#This plots shows little year-over-year increase 2018-2019, larges in crease 2019-2020
+#This plots shows little year-over-year increase 2018-2019, larges in crease 2019-2020 (not just secular trend)
 plot(summary1$ratio20_19, summary1$ratio19_18)
 #View(summary1)
 
