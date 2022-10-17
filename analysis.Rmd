@@ -9,6 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyr)
 library(MASS)
 library(lubridate)
+library(dplyr)
 library(rjags)
 library(stringr)
 library(ggplot2)
@@ -271,16 +272,24 @@ ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
 
 
 ## Competing risks
-People can die from COVID, or they can die from something else. Probability of detah from something else can be determined from baseline death rate
+
+People can die from COVID, or they can die from something else. Probability of death from something else can be determined from baseline death rate
 
 start with N people, each quarter, probability of being alive is (1-P_die) for 3 quarters it (1-P_die)^3 
+
+** important note: as in Kissler and grad,ned to convert probabilities to rates before multiplying with RR, then convert back to probability ** 
+
 ```{r}
 
 P_die_qtr_base <- exp(7.5302187)/100000 # probability an 84 year old dies in a quarter
 
+rate_die_qtr_base <- -log(1-P_die_qtr_base) #convert probability to rate
+  
 RR_Pandemic <- exp(0.164847030)
 
-P_die_qtr_pandemic <- P_die_qtr_base*RR_Pandemic
+rate_die_qtr_pandemic <- rate_die_qtr_base*RR_Pandemic #multiple rate by RR
+
+P_die_qtr_pandemic <- 1 - exp(-rate_die_qtr_pandemic*1) #convert rate back to probability
 
 P_die_virus <- P_die_qtr_pandemic - P_die_qtr_base #Prob excess deaths; most of which are virus
 
@@ -315,6 +324,8 @@ for(i in 2:length(t)) {
 
 }
 
+plot(Die_COVID)
+
 ```
  
  It might make sense to focus in on people with certain conditions, like cancer; diabetes; etc.
@@ -326,8 +337,8 @@ d1 <- readRDS('./Data/diabetes_covid_deaths_line_list_no_geo.rds')
 
  d1 %>%
   filter(year %in% c(2019,2020)) %>%
-   group_by(year) %>%
-  summarize(N_diabetes=sum(diabetes), N_covid_diabetes=sum(covid_diabetes))
+   dplyr::group_by(year) %>%
+  dplyr::summarize(N_diabetes=sum(diabetes), N_covid_diabetes=sum(covid_diabetes))
 
  
 summary1 <- d1 %>%
