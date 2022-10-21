@@ -304,12 +304,12 @@ life_table <- cbind.data.frame('prob_death_cond'=annual_prob_death) %>% #prob of
          log_prob_surv =log(1-prob_death_cond), 
          cum_log_prob_surv=cumsum(log_prob_surv) - log_prob_surv , #log probability survive to this point
          cum_prob_surv=exp(cum_log_prob_surv), #probability survive to this point
-         prob_death_uncond= prob_death_cond*cum_prob_surv) #probability of dying in this month
+         prob_death_uncond= prob_death_cond*cum_prob_surv,
+         prob_death_uncond= prob_death_uncond/sum(prob_death_uncond)) #unconditional probability of dying at this age
 
-#unconditional
 
-life_table <- annual_prob_death * 
-
+plot(life_table$prob_death_cond, type='l')
+plot(life_table$prob_death_uncond, type='l')
 ```
 
 
