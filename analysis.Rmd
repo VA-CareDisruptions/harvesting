@@ -56,7 +56,7 @@ a2 <- a1 %>%
 #https://www.census.gov/data/tables/time-series/demo/popest/2020s-national-detail.html
 
 pop1 <- read_excel('./Data/nc-est2019-syasexn.xlsx', sheet='compiled') %>%
-  mutate(age=age*100) %>%
+  mutate(age=round(age*100)) %>%
  reshape2::melt( id.vars=c('age', 'sex')) %>%
   mutate(year=as.numeric(substring(variable,2)), month=7)
 
@@ -66,18 +66,18 @@ pop1 <- read_excel('./Data/nc-est2019-syasexn.xlsx', sheet='compiled') %>%
     tidyr::complete( month, nesting(year,age,  sex), fill=list(pop=NA) ) %>%
     mutate(date= as.Date(paste(year, month, '01', sep='-'))) %>%
     filter(date>='2013-07-01')  %>%
-    group_by(age , sex)  %>%
     rename(pop=value, agey=age) %>%
     arrange(agey , sex,year, month) %>%
+    group_by(agey, sex) %>%
     mutate(time= year + month/12 - 1/12 ) %>%
     mutate(pop.interpol=approx(time,pop,time)$y) %>%
-    ungroup() %>%
+    ungroup()%>%
     select(agey, sex, date, pop.interpol)
 
 a3 <- full_join(a2, pop1a, by=c('agey','sex','date')) %>%
   mutate(    agec = as.factor(agec)
     ) %>%
-  filter( !is.na(pop.interpol) & !is.na(pop.interpol) & year >= 2014) %>%
+  filter( !is.na(pop.interpol) & year >= 2014) %>%
   mutate(N_deaths = if_else(is.na(N_deaths),0, N_deaths),
          month=as.factor(month(date)),
          pandemic_period= if_else(date>='2020-04-01',1,0), #START APRIl 1 (QTR2)
