@@ -14,6 +14,7 @@ library(rjags)
 library(stringr)
 library(ggplot2)
 library(HDInterval)
+library(readxl)
 library(INLA)
 ```
 Interesting questions: competing risks: a lot of people died during covid; at some point we should see a decline in overall death rates below baseline because of this 'harvesting' effect. in which groups will this be most apparent?
@@ -34,12 +35,12 @@ a1 <- readRDS('./Data/all_cause_deaths_age_race_sex_year.rds')
 #https://www.cdc.gov/nchs/data/dvs/Multiple-Cause-Record-Layout-2020.pdf 
 
 a2 <- a1 %>%
-  group_by(agey,race_recode, month, year,sex) %>%
-  mutate(agey = if_else(agey>85,85, agey)) %>%
+  group_by(agey, month, year,sex) %>%
+  mutate(agey = if_else(agey>100,100, agey)) %>%
   filter(agey !=999) %>%
   summarize(N_deaths=sum(N_deaths)) %>%
   ungroup() %>%
-    tidyr::complete(agey,race_recode, month, year,sex, fill=list(N_deaths=0)) %>% #fills 0s
+    tidyr::complete(agey, month, year,sex, fill=list(N_deaths=0)) %>% #fills 0s
   mutate(date=as.Date(paste(year, month, '01', sep='-'), format='%Y-%m-%d'),
     agec = if_else(agey<35,1,
            if_else( agey<45,2,
@@ -50,11 +51,31 @@ a2 <- a1 %>%
   )
 
 
-pop1 <- readRDS('./Data/pop_interpol_single_age.rds')
+#pop1 <- readRDS('./Data/pop_interpol_single_age.rds')
+#https://www.census.gov/newsroom/press-kits/2020/population-estimates-detailed.html
+#https://www.census.gov/data/tables/time-series/demo/popest/2020s-national-detail.html
 
-a3 <- full_join(a2, pop1, by=c('agey','sex','race_recode','date')) %>%
-  mutate(    agec = as.factor(agec),
-    race_recode= as.factor(race_recode)
+pop1 <- read_excel('./Data/nc-est2019-syasexn.xlsx', sheet='compiled') %>%
+  mutate(age=age*100) %>%
+ reshape2::melt( id.vars=c('age', 'sex')) %>%
+  mutate(year=as.numeric(substring(variable,2)), month=7)
+
+  months <- cbind.data.frame('month'=1:12)
+
+  pop1a <-    bind_rows(pop1, months) %>%
+    tidyr::complete( month, nesting(year,age,  sex), fill=list(pop=NA) ) %>%
+    mutate(date= as.Date(paste(year, month, '01', sep='-'))) %>%
+    filter(date>='2013-07-01')  %>%
+    group_by(age , sex)  %>%
+    rename(pop=value, agey=age) %>%
+    arrange(agey , sex,year, month) %>%
+    mutate(time= year + month/12 - 1/12 ) %>%
+    mutate(pop.interpol=approx(time,pop,time)$y) %>%
+    ungroup() %>%
+    select(agey, sex, date, pop.interpol)
+
+a3 <- full_join(a2, pop1a, by=c('agey','sex','date')) %>%
+  mutate(    agec = as.factor(agec)
     ) %>%
   filter( !is.na(pop.interpol) & !is.na(pop.interpol) & year >= 2014) %>%
   mutate(N_deaths = if_else(is.na(N_deaths),0, N_deaths),
@@ -74,14 +95,14 @@ a3 <- full_join(a2, pop1, by=c('agey','sex','race_recode','date')) %>%
    
 ```{r}
 
-mod1 <- glm.nb(N_deaths ~ pandemic_period*race_recode + 
-              pandemic_period*sex + 
-              year + 
-              month + 
-              pandemic_period*agec + 
-              offset(log(pop.interpol)),  data=a3  )
-
-summary(mod1)
+# mod1 <- glm.nb(N_deaths ~ pandemic_period*race_recode + 
+#               pandemic_period*sex + 
+#               year + 
+#               month + 
+#               pandemic_period*agec + 
+#               offset(log(pop.interpol)),  data=a3  )
+# 
+# summary(mod1)
 
 
 ```
@@ -98,7 +119,7 @@ b1 <- a3 %>%
   ungroup() %>%
   group_by(year,qtr,pandemic_period, agey) %>%
   summarize(N_deaths=sum(N_deaths), pop=mean(pop)) %>% # for the quarters, take mean so don't double count people
-  mutate(log.offset=log(pop/100000))
+  mutate(log.offset=log(pop/100000), raw_prob_death= N_deaths/pop)
 
 mod.test <- glm(N_deaths ~ offset(log.offset) +agey, data=b1, family='poisson')
 ```
@@ -129,19 +150,19 @@ for(t in 1:N_times){
   beta[1] ~ dnorm(0, (1-rho^2)*tau.beta)
   baseline_prob[1] <- beta[1] +int
   
-  for(i in 2:86){
+  for(i in 2:101){
       beta[i] ~ dnorm(rho*beta[i-1], tau.beta) #AR(1) model
       baseline_prob[i] <- beta[i] +int
   }
   
   delta[1] ~ dnorm(0, (1-rho2^2)*tau.delta)
-    for(i in 2:86){
+    for(i in 2:101){
       delta[i] ~ dnorm(rho2*delta[i-1], tau.delta) #AR(1) model
     }
   
     
   epsilon[1] ~ dnorm(0, (1-rho3^2)*tau.epsilon)
-    for(i in 2:86){
+    for(i in 2:101){
       epsilon[i] ~ dnorm(rho2*epsilon[i-1], tau.epsilon) #AR(1) model
   }
   
@@ -267,6 +288,27 @@ ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
   geom_hline(yintercept=1)+
   ylab('RR per quarter')
 
+
+```
+
+
+Life expectancy
+```{r}
+rate_death <- exp(post_baseline_prob$post_means)/100000 #quarterly rate
+
+#conditional probability of death per year
+annual_prob_death <- 1- exp(-1*rate_death*4) #annual probability of death; compare to: https://www.ssa.gov/oact/STATS/table4c6.html
+
+life_table <- cbind.data.frame('prob_death_cond'=annual_prob_death) %>% #prob of dying in this year conditional on having suvived
+  mutate(agey=0:100,
+         log_prob_surv =log(1-prob_death_cond), 
+         cum_log_prob_surv=cumsum(log_prob_surv) - log_prob_surv , #log probability survive to this point
+         cum_prob_surv=exp(cum_log_prob_surv), #probability survive to this point
+         prob_death_uncond= prob_death_cond*cum_prob_surv) #probability of dying in this month
+
+#unconditional
+
+life_table <- annual_prob_death * 
 
 ```
 
