@@ -235,13 +235,13 @@ index_n <- as.numeric(unlist(indices))
 combined <- cbind.data.frame(post_means, ci,index_n )
 
 post_beta<- as.data.frame(combined[grep('beta',names(post_means)),]) %>%
-  filter(index_n<=85)
+  filter(index_n<=101)
 
 post_delta<- as.data.frame(combined[grep('delta',names(post_means)),]) %>%
-  filter(index_n<=85)
+  filter(index_n<=101)
 
 post_epsilon<- as.data.frame(combined[grep('epsilon',names(post_means)),]) %>%
-  filter(index_n<=85)
+  filter(index_n<=101)
 
 post_baseline_prob<- as.data.frame(combined[grep('baseline_prob',names(post_means)),]) 
 
@@ -299,17 +299,52 @@ rate_death <- exp(post_baseline_prob$post_means)/100000 #quarterly rate
 #conditional probability of death per year
 annual_prob_death <- 1- exp(-1*rate_death*4) #annual probability of death; compare to: https://www.ssa.gov/oact/STATS/table4c6.html
 
+post_delta_rr <- post_delta %>%
+    mutate(agey= index_n -1) %>%
+  mutate(pandemic_rr=exp(post_means),pandemic_rr_lcl=exp(`1`),pandemic_rr_ucl=exp(`2`) ) %>%
+  select(agey,starts_with('pandemic_rr'))
+
 life_table <- cbind.data.frame('prob_death_cond'=annual_prob_death) %>% #prob of dying in this year conditional on having suvived
   mutate(agey=0:100,
          log_prob_surv =log(1-prob_death_cond), 
          cum_log_prob_surv=cumsum(log_prob_surv) - log_prob_surv , #log probability survive to this point
          cum_prob_surv=exp(cum_log_prob_surv), #probability survive to this point
          prob_death_uncond= prob_death_cond*cum_prob_surv,
-         prob_death_uncond= prob_death_uncond/sum(prob_death_uncond)) #unconditional probability of dying at this age
+         prob_death_uncond= prob_death_uncond/sum(prob_death_uncond)
+         
+        ) %>% #unconditional probability of dying at this age
+  left_join(post_delta_rr, by='agey') %>%
+  mutate(rate_death_cond = -1/1*log(1-prob_death_cond),
+         rate_death_cond_pandemic=rate_death_cond*pandemic_rr ,
+         prob_death_cond_pandemic = 1 - exp(-1*rate_death_cond_pandemic),
+         excess_cond_prob_death= prob_death_cond_pandemic - prob_death_cond,
+         
+         #Then calculate excess unconditional probability of death
+         log_prob_surv_pandemic =log(1-prob_death_cond_pandemic), 
+         cum_log_prob_surv_pandemic=cumsum(log_prob_surv_pandemic) - log_prob_surv_pandemic , #log probability survive to this point
+         cum_prob_surv_pandemic=exp(cum_log_prob_surv_pandemic), #probability survive to this point
+         prob_death_uncond_pandemic= prob_death_cond_pandemic*cum_prob_surv_pandemic,
+         prob_death_uncond_pandemic= prob_death_uncond_pandemic/sum(prob_death_uncond_pandemic)
+         
+         ) #excess probability of death, by age
 
+
+life_expect_birth <-  life_table %>%
+  mutate(piece = (agey+0.5)*prob_death_uncond) %>%
+  summarize(le = sum(piece))
 
 plot(life_table$prob_death_cond, type='l')
+points(life_table$prob_death_cond_pandemic, type='l', col='red', lty=2)
+
+#Unconditional probability of dying by age; by definition, if shift earlier, fewer people will die later
 plot(life_table$prob_death_uncond, type='l')
+points(life_table$prob_death_uncond_pandemic, type='l', col='red', lty=2)
+
+
+plot(life_table$cum_prob_surv, type='l')
+points(life_table$cum_prob_surv_pandemic, type='l', col='red', lty=2)
+
+
 ```
 
 
