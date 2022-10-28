@@ -293,8 +293,9 @@ ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
 ```
 
 
-Life expectancy
+excess deaths and LE
 ```{r}
+
 rate_death <- exp(post_baseline_prob$post_means)/100000 #quarterly rate
 
 #conditional probability of death per year
@@ -367,11 +368,9 @@ N_death_annual1 <- pop$pop * m_diag
  abline(a=0, b=1)
  
 
-trng <- -5:10
+trng <- -5:20
 
 k <- 2
-
-
 
 le_sim_2 <- sim_covid(trng, life_table$prob_death_uncond, life_table$pandemic_rr, k)
 
@@ -386,6 +385,7 @@ fig_le_example #artifactual drop and spike in life expectancy
 prob_death_sim <- le_sim_2$prob_death 
 
 N_death_sim <- apply(prob_death_sim,2, function(x) x*pop$pop)
+
 colnames(N_death_sim) <- 1:ncol(N_death_sim)
 
 N_death_sim.m <- reshape2::melt(N_death_sim) %>%
@@ -397,7 +397,7 @@ N_death_sim.m <- reshape2::melt(N_death_sim) %>%
                         if_else(agey>=85 & agey<101,5, 999)))))) %>%
   group_by(agec, year_index) %>%
   summarize(expected_N_deaths=sum(value)) %>%
-  mutate(year= year_index-3)
+  mutate(year= year_index-6)
 
 
 	ggplot(N_death_sim.m, aes(x=year, y=expected_N_deaths)) + 
