@@ -367,7 +367,7 @@ N_death_annual1 <- pop$pop * m_diag
  abline(a=0, b=1)
  
 
-trng <- -1:10
+trng <- -5:10
 
 k <- 2
 
@@ -389,14 +389,15 @@ N_death_sim <- apply(prob_death_sim,2, function(x) x*pop$pop)
 colnames(N_death_sim) <- 1:ncol(N_death_sim)
 
 N_death_sim.m <- reshape2::melt(N_death_sim) %>%
-  rename(agey=Var1, year=Var2) %>%
+  rename(agey=Var1, year_index=Var2) %>%
    mutate( agec =if_else(agey>=0 & agey<18,1, 
                         if_else(agey>=18 & agey<40,2,
                         if_else(agey>=40 & agey<65,3,
                         if_else(agey>=65 & agey<85,4,
                         if_else(agey>=85 & agey<101,5, 999)))))) %>%
-  group_by(agec, year) %>%
-  summarize(expected_N_deaths=sum(value))
+  group_by(agec, year_index) %>%
+  summarize(expected_N_deaths=sum(value)) %>%
+  mutate(year= year_index-3)
 
 
 	ggplot(N_death_sim.m, aes(x=year, y=expected_N_deaths)) + 
@@ -406,7 +407,6 @@ N_death_sim.m <- reshape2::melt(N_death_sim) %>%
 	  theme_classic()+
 	  facet_wrap(~agec, scales='free' )
 
-fig_le_example #artifactual drop and spike in life expectancy
 
 
 ```
