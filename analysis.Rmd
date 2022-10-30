@@ -349,63 +349,91 @@ m <- make_upper_tri(life_table$prob_death_uncond, shift=FALSE)
 m <- norm_rows(m)
 m_init <- m
 
-##go in reverse--from life matrix, calculate incidence
-#diagonal of m gives conditional probability by age
-m_diag <- diag(m)
-#m_diag[101] <- 0.999999
-rate_death_annual = -1/1*log(1-m_diag)
-
 pop <- b1 %>% ungroup() %>%
   filter(year==2019 ) %>% select(pop, agey,N_deaths) %>%
   group_by(agey) %>%
   summarize(pop=mean(pop), Obs_deaths2019=sum(N_deaths)) %>%
   ungroup()
 
-N_death_annual1 <- pop$pop * m_diag
-#N_death_annual2 <- pop$pop * rate_death_annual
-
- plot(N_death_annual1, pop$Obs_deaths2019)
- abline(a=0, b=1)
- 
-
-trng <- -5:20
-
-k <- 2
-
-le_sim_2 <- sim_covid(trng, life_table$prob_death_uncond, life_table$pandemic_rr, k)
-
-fig_le_example <- le_sim_2$le %>% 
-	ggplot(aes(x=t, y=le)) + 
-		geom_point() + 
-		geom_line()
-
-fig_le_example #artifactual drop and spike in life expectancy
+#reverse M matrix to get deaths for current and future years
+m.long <- reshape2::melt(m_init) %>%
+  rename('initial_age'=Var1, index=Var2, uncond_prob=value) %>%
+  filter(index >= initial_age) %>%
+  arrange(initial_age, index) %>%
+  group_by(initial_age) %>%
+  mutate(yearN=(row_number() -1),
+         age_death= initial_age + yearN  ) %>%
+   left_join(pop, by=c("initial_age"="agey") ) %>%
+  mutate("N_deaths_expected" = uncond_prob * pop )
+  
+m.long %>% 
+  filter(age_death>=65) %>%
+ggplot( aes(x=yearN, y=N_deaths_expected, group=age_death, color=age_death)) +
+  geom_line()+
+  theme_classic()
 
 
-prob_death_sim <- le_sim_2$prob_death 
 
-N_death_sim <- apply(prob_death_sim,2, function(x) x*pop$pop)
+#MODIFIED m matrix for pandemic year
 
-colnames(N_death_sim) <- 1:ncol(N_death_sim)
+ k=3
 
-N_death_sim.m <- reshape2::melt(N_death_sim) %>%
-  rename(agey=Var1, year_index=Var2) %>%
-   mutate( agec =if_else(agey>=0 & agey<18,1, 
-                        if_else(agey>=18 & agey<40,2,
-                        if_else(agey>=40 & agey<65,3,
-                        if_else(agey>=65 & agey<85,4,
-                        if_else(agey>=85 & agey<101,5, 999)))))) %>%
-  group_by(agec, year_index) %>%
-  summarize(expected_N_deaths=sum(value)) %>%
-  mutate(year= year_index-6)
+ # --- Calculate excess probability of death from COVID:
+      # Turn the baseline probability of death...
+      p_death <- diag(m)
+      # into a baseline rate of death...
+      r_death <- -log(1-p_death)
+      # then calculate the rate of death from COVID...
+      xi = life_table$pandemic_rr
+      r_death_covid <- xi*r_death
+      # and convert back into a probability of death during COVID.
+      p_death_covid <- 1-exp(-r_death_covid)
+      # Calculate the excess probability of death from COVID
+      excess_p_death_covid <- p_death_covid - p_death
+      
+      # --- Distribute excess probability across future-years: 
+      # Create a matrix of future-year proportions: 
+      fymat <- m-diag(diag(m))
+      # Create a matrix of death-probability dropoff: 
+      kmat <- make_upper_tri(c(0,k^(-(0:(ncol(m)-2)))), shift=TRUE)
+      # Calculate the normalizing factor for death dropoff: 
+      x <- excess_p_death_covid/rowSums(kmat*fymat)
+      x[is.na(x)] <- 0
+      # Turn this normalizing factor into a matrix:
+      xmat <- matrix(rep(x,nrow(m)),nrow=nrow(m))
+      # Calculate the distribution of excess death across future-years:
+      fy_death_dist_mat <- xmat*kmat*fymat
+      # Reduce future-year proportions to account for excess death:
+      m_pandemic <- m - fy_death_dist_mat
+      # Add that excess death to this year's deaths:
+      diag(m_pandemic) <- diag(m_pandemic) + excess_p_death_covid
 
+m.long.pandemic <- reshape2::melt(m_pandemic) %>%
+  rename('initial_age'=Var1, index=Var2, uncond_prob=value) %>%
+  filter(index >= initial_age) %>%
+  arrange(initial_age, index) %>%
+  group_by(initial_age) %>%
+  mutate(yearN=(row_number() -1),
+         age_death= initial_age + yearN  ) %>%
+   left_join(pop, by=c("initial_age"="agey") ) %>%
+  mutate(N_deaths_expected_Post_pand = uncond_prob * pop,
+             agec =if_else(age_death>=0 & age_death<18,1, 
+                        if_else(age_death>=18 & age_death<40,2,
+                        if_else(age_death>=40 & age_death<65,3,
+                        if_else(age_death>=65 & age_death<85,4,
+                        if_else(age_death>=85 & age_death<101,5, 999)))))) %>%
+  ungroup() %>%
+  select(N_deaths_expected_Post_pand, age_death, yearN) %>%
+  left_join(m.long, by=c('age_death','yearN'))
 
-	ggplot(N_death_sim.m, aes(x=year, y=expected_N_deaths)) + 
-		geom_point() + 
-		geom_line() +
-	  ylim(0,NA)+
-	  theme_classic()+
-	  facet_wrap(~agec, scales='free' )
+m.long.pandemic %>% 
+  filter(age_death==65 & yearN<=10) %>%
+ggplot( aes(x=yearN, y=N_deaths_expected_Post_pand, group=age_death, color='red')) +
+  geom_line()+
+  geom_line(aes(x=yearN, y=N_deaths_expected, col='gray')) +
+  theme_classic() +
+  ylim(0,NA)
+
 
 
 
