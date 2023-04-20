@@ -9,6 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyr)
 library(MASS)
 library(lubridate)
+library(INLA)
 library(dplyr, warn.conflicts = FALSE)
 
 # Suppress summarise info
@@ -122,13 +123,67 @@ b1 <- a3 %>%
   group_by(year,month,qtr,pandemic_period, agey) %>%
     summarize(N_deaths=sum(N_deaths), pop=sum(pop.interpol)) %>% 
   ungroup() %>%
-  group_by(year,qtr,pandemic_period, agey) %>%
+  arrange(agey, year, qtr) %>%
+  group_by(agey,year,qtr,pandemic_period) %>%
   summarize(N_deaths=sum(N_deaths), pop=mean(pop)) %>% # for the quarters, take mean so don't double count people
-  mutate(log.offset=log(pop/100000), raw_prob_death= N_deaths/pop)
+  mutate(log.offset=log(pop/100000), 
+         raw_prob_death= N_deaths/pop,) %>% 
+  ungroup() %>%
+  group_by(agey) %>%
+  mutate(t=row_number(), agey2=agey, agey3=agey)
 
 mod.test <- glm(N_deaths ~ offset(log.offset) +agey, data=b1, family='poisson')
 ```
 
+  
+
+```{r}
+#https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0130137
+
+#for Gamma 3,2
+theta1 = log(4)
+theta2 = 
+
+#formula
+formula1 <- N_deaths ~  1 + #intercept
+    t +   #fixed effect for time
+  pandemic_period + #fixed effect for pandemic
+    f(agey,model = "ar1", hyper=list(prior = "loggamma", param = c(3,2)))+  #age-specific intercept
+    f(agey2,t,model = "ar1") +  #age-varying effect for time
+    f(agey3,pandemic_period,model = "ar1") +  #age-varying effect for pandemic
+   log.offset
+
+#from Josh warren
+
+prior_fixed<-list(mean.intercept = 0.00, prec.intercept = (1.00/(100.00^2)),  #\beta_0 ~ N(0.00, 100.00^2)
+                  mean = 0.00, prec = (1.00/(100.00^2)))                      #\beta_j ~ N(0.00, 100.00^2); j=1,...,p
+
+prior_hyper<-list(theta = list(prior = "normal", param = c(0.00, (1.00/(100.00^2)))))  #ln(r) ~ N(0.00, 100.00^2)
+
+
+
+# Run model
+inla.out <- inla(formula1, family = "nbinomial", data = b1,
+ control.fixed = prior_fixed,
+                 control.family = list(hyper = prior_hyper),
+                 control.compute = list(dic = TRUE, 
+                                        waic = TRUE, 
+                                        config = TRUE,
+                                        return.marginals.predictor = TRUE))
+
+# Extract fitted values
+b1$pred1 <- inla.out$summary.fitted.values[,"mean"]
+
+ggplot(b1, aes(x=agey, y=pred1, group=t))+
+  geom_line()+
+  theme_classic()
+
+# Fixed effects
+summary(inla.out)$fixed
+
+# Random effects
+summary(inla.out)$hyperpar
+```
 
 
 ```{r, eval=F}
