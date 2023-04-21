@@ -9,6 +9,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyr)
 library(MASS)
 library(lubridate)
+
+library(plotly)
+library(INLA)
 library(dplyr, warn.conflicts = FALSE)
 
 # Suppress summarise info
@@ -19,6 +22,7 @@ library(stringr)
 library(ggplot2)
 library(HDInterval)
 library(readxl)
+library(patchwork)
 library(INLA)
 source('./R/utils_kissler.R')
 ```
@@ -122,108 +126,100 @@ b1 <- a3 %>%
   group_by(year,month,qtr,pandemic_period, agey) %>%
     summarize(N_deaths=sum(N_deaths), pop=sum(pop.interpol)) %>% 
   ungroup() %>%
-  group_by(year,qtr,pandemic_period, agey) %>%
+  arrange(agey, year, qtr) %>%
+  group_by(agey,year,qtr,pandemic_period) %>%
   summarize(N_deaths=sum(N_deaths), pop=mean(pop)) %>% # for the quarters, take mean so don't double count people
-  mutate(log.offset=log(pop/100000), raw_prob_death= N_deaths/pop)
+  mutate(log.offset=log(pop/100000), 
+         raw_prob_death= N_deaths/pop,) %>% 
+  ungroup() %>%
+  group_by(agey) %>%
+  mutate(t=row_number(), agey2=agey, agey3=agey) %>%
+  ungroup() %>%
+  arrange(year, qtr,pandemic_period, agey )
 
-mod.test <- glm(N_deaths ~ offset(log.offset) +agey, data=b1, family='poisson')
+
+
+# b1 <- a3 %>%
+#   mutate(qtr=as.factor(quarter(date))) %>%
+#   group_by(year,month,qtr,pandemic_period, agey) %>%
+#     summarize(N_deaths=sum(N_deaths), pop=sum(pop.interpol)) %>% 
+#   ungroup() %>%
+#   group_by(year,qtr,pandemic_period, agey) %>%
+#   summarize(N_deaths=sum(N_deaths), pop=mean(pop)) %>% # for the quarters, take mean so don't double count people
+#   mutate(log.offset=log(pop/100000), raw_prob_death= N_deaths/pop)
+
+
+
+
 ```
 
+  
+
+```{r}
+#run the model
+source('./R/inla_mod.R')
+```
+
+```{r}
+# Extract fitted values
+b1$pred1 <- inla.out$summary.fitted.values[,"mean"]
+
+p0.fitted <- ggplot(b1, aes(x=agey, y=log(pred1/pop), group=t, col=t))+
+  geom_line()+
+  theme_classic()
+
+#extract random effects
+re.age <- inla.out$summary.random$agey %>%
+  mutate()
+
+p1.age.inla <- ggplot(re.age, aes(x=ID, y=mean))+
+  geom_line()+
+  theme_classic()+
+  geom_ribbon(data=re.age, aes(x=ID, ymin=`0.025quant`, ymax=`0.975quant`), alpha=0.2)
+p1.age.inla
+
+re.age.time <- inla.out$summary.random$agey2 %>%
+  mutate()
+
+p2.time.age.inla <- ggplot(re.age.time, aes(x=ID, y=exp(mean)))+
+  geom_line()+
+  theme_classic()+
+  geom_ribbon(data=re.age.time, aes(x=ID, ymin=exp(`0.025quant`), ymax=exp(`0.975quant`)), alpha=0.2)+
+  geom_hline(yintercept = 1)
+p2.time.age.inla
+
+re.age.pandemic <- inla.out$summary.random$agey3 %>%
+  mutate()
+
+p3.pandemic.age.inla <- ggplot(re.age.pandemic, aes(x=ID, y=exp(mean)))+
+  geom_line()+
+  theme_classic()+
+  geom_ribbon(data=re.age.pandemic, aes(x=ID, ymin=exp(`0.025quant`), ymax=exp(`0.975quant`)), alpha=0.2) +
+  geom_hline(yintercept = 1)
+p3.pandemic.age.inla
+
+
+# Fixed effects
+summary(inla.out)$fixed
+
+# Random effects
+summary(inla.out)$hyperpar
+```
 
 
 ```{r, eval=F}
-
-mod.mat <- model.matrix(~ agey +pandemic_period +qtr, data=b1)
-
-model_string <- "
-model{
-for(t in 1:N_times){ 
-  N_deaths[t] ~ dnegbin(prob[t],r)
-  prob[t]<- r/(r+lambda[t])
-  
-  #N_deaths[t] ~ dpois(lambda[t])
-  
-  log(lambda[t]) <- ( int  + 
-  log.offset[t] + #offset
-  beta[agey[t]+1] + #age-specific intercept
-  pandemic[t]*delta[agey[t]+1] + #age specific pandemic effect 
-  epsilon[agey[t]+1]*t #age specific trend
-  )
-
-}
-  
-  beta[1] ~ dnorm(0, (1-rho^2)*tau.beta)
-  baseline_prob[1] <- beta[1] +int
-  
-  for(i in 2:101){
-      beta[i] ~ dnorm(rho*beta[i-1], tau.beta) #AR(1) model
-      baseline_prob[i] <- beta[i] +int
-  }
-  
-  delta[1] ~ dnorm(0, (1-rho2^2)*tau.delta)
-    for(i in 2:101){
-      delta[i] ~ dnorm(rho2*delta[i-1], tau.delta) #AR(1) model
-    }
-  
-    
-  epsilon[1] ~ dnorm(0, (1-rho3^2)*tau.epsilon)
-    for(i in 2:101){
-      epsilon[i] ~ dnorm(rho2*epsilon[i-1], tau.epsilon) #AR(1) model
-  }
-  
-   int ~ dnorm(0, 1e-4)
-   
-   tau.beta~ dgamma(3, 2)
-   tau.delta~ dgamma(3,2)
-   tau.epsilon~ dgamma(3,2)
-
-   rho ~ dunif(-1,1)
-   rho2 ~ dunif(-1,1)
-   rho3 ~ dunif(-1,1)
-   
-    r ~ dunif(0,250)
-
- }
-"
-##############################################################
-#Model Fitting
-##############################################################
-inits1=list(".RNG.seed"=c(123), ".RNG.name"='base::Wichmann-Hill')
-inits2=list(".RNG.seed"=c(456), ".RNG.name"='base::Wichmann-Hill')
-inits3=list(".RNG.seed"=c(789), ".RNG.name"='base::Wichmann-Hill')
-##############################################
-#Model Organization
-##############################################
-model_spec<-textConnection(model_string)
-model_jags<-jags.model(model_spec, 
-                       inits=list(inits1,inits2, inits3),
-                       data=list('N_deaths'=b1$N_deaths ,
-                                 'N_times'=nrow(b1) ,
-                                 'log.offset'=b1$log.offset,
-                                 'agey'=b1$agey,
-                                 'pandemic'=b1$pandemic_period
-                                    ),
-                       n.adapt=10000, 
-                       n.chains=3)
-
-params<-c( 'beta','delta','epsilon','rho','tau.beta','int','baseline_prob')
-##############################################
-#Posterior Sampling
-##############################################
-posterior_samples<-coda.samples(model_jags, 
-                                params, 
-                                n.iter=10000)
-posterior_samples.all<-do.call(rbind,posterior_samples)
-
-saveRDS(posterior_samples.all, './Results/posteriors.rds')
+#RUN THE JAGS MODEL
+#source('./R/jags_mod.R')
 ```
 
 
+trouble with epsi lon an dbeta corr
 ```{r}
 posterior_samples.all <- readRDS( './Results/posteriors.rds')
 
 #post1.summary<-summary(posterior_samples)
 #post_means<-colMeans(posterior_samples.all)
+
 post_means<-apply(posterior_samples.all, 2, mean)
 sample.labs<-names(post_means)
 ci<-t(hdi(posterior_samples.all, credMass = 0.95))
@@ -232,6 +228,7 @@ ci<-matrix(ci, ncol=2)
 row.names(ci)<-sample.labs
 #post_means<-sprintf("%.1f",round(post_means,1))
 names(post_means)<-sample.labs
+
 indices <- str_extract_all(names(post_means), "(?<=\\[).+?(?=\\])")
 rep1 <- sapply(indices, function(x) identical(x, character(0))) #is it missing ie character(0)
 indices[which(rep1==1)] <- '999'
@@ -248,6 +245,13 @@ post_delta<- as.data.frame(combined[grep('delta',names(post_means)),]) %>%
 post_epsilon<- as.data.frame(combined[grep('epsilon',names(post_means)),]) %>%
   filter(index_n<=101)
 
+taus<- as.data.frame(combined[grep('tau',names(post_means)),]) 
+taus
+
+int<- as.data.frame(combined[grep('int',names(post_means)),]) 
+int
+
+
 post_baseline_prob<- as.data.frame(combined[grep('baseline_prob',names(post_means)),]) 
 
 # ggplot(post_beta, aes(x=index_n, y=exp(post_means))) +
@@ -257,7 +261,7 @@ post_baseline_prob<- as.data.frame(combined[grep('baseline_prob',names(post_mean
 #   ggtitle('Mortality ratio by Age') +
 #     xlab('Age (years)')
 
-ggplot(post_baseline_prob, aes(x=index_n, y=(post_means))) +
+p0.age.rate <- ggplot(post_baseline_prob, aes(x=index_n, y=(post_means))) +
   theme_classic() +
   geom_ribbon(aes(x=index_n, ymin=(`1`), ymax=(`2`)),fill='gray80') +
   geom_line()+
@@ -265,27 +269,27 @@ ggplot(post_baseline_prob, aes(x=index_n, y=(post_means))) +
   ggtitle('Log-Deaths/100000 per quarter') +
     xlab('Age (years)')
 
+p0.age.rate
 
-ggplot(post_baseline_prob, aes(x=index_n, y=exp(post_means))) +
+p1.age.jags <- ggplot(post_beta, aes(x=index_n, y=(post_means))) +
   theme_classic() +
-  geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
+  geom_ribbon(aes(x=index_n, ymin=(`1`), ymax=(`2`)),fill='gray80') +
   geom_line()+
-  ggtitle('Pre-pandemic rate of death') +
-    xlab('Age (years)') +
-  ylab('Deaths/100000 per quarter')
+    ylab('RR by age') +
+  ggtitle('age effect') +
+    xlab('Age (years)')
 
-ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
-  theme_classic() +
-  geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
-  geom_line()+
-  ggtitle('Pandemic effect (RR) by Age') +
-    xlab('Age (years)') +
-  ylab('Pandemic effect (RR')+
-    geom_hline(yintercept=1)
+p1.age.jags
 
+# ggplot(post_baseline_prob, aes(x=index_n, y=exp(post_means))) +
+#   theme_classic() +
+#   geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
+#   geom_line()+
+#   ggtitle('Pre-pandemic rate of death') +
+#     xlab('Age (years)') +
+#   ylab('Deaths/100000 per quarter')
 
-
-ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
+p2.time.age.jags <- ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
   theme_classic() +
   geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
   geom_line()+
@@ -293,10 +297,38 @@ ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
     xlab('Age (years)') +
   geom_hline(yintercept=1)+
   ylab('RR per quarter')
+p2.time.age.jags
 
+p3.pandemic.age.jags <-  ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
+  theme_classic() +
+  geom_ribbon(aes(x=index_n, ymin=exp(`1`), ymax=exp(`2`)),fill='gray80') +
+  geom_line()+
+  ggtitle('Pandemic effect (RR) by Age') +
+    xlab('Age (years)') +
+  ylab('Pandemic effect (RR)')+
+    geom_hline(yintercept=1)
 
+p3.pandemic.age.jags
 ```
 
+
+```{r}
+post_beta_samps <-  t(posterior_samples.all[,grep('delta',colnames(posterior_samples.all))])
+
+matplot(post_beta_samps[,1:1000], type='l', col=rgb(0,0,0, alpha=0.1))
+```
+#3 Direct comparison of INLA and JAGS
+```{r}
+
+
+(p1.age.jags+ggtitle('JAGS') + ylim(0,10)) + (p1.age.inla+ggtitle('INLA')+ ylim(0,10))
+
+#NOTE DIFFERENT SCALE HERE
+(p2.time.age.jags+ggtitle('JAGS') +ylim(0.98,1.03)) + (p2.time.age.inla+ggtitle('INLA')+ylim(0.98,1.03))
+
+(p3.pandemic.age.jags+ggtitle('JAGS') +ylim(0.8,1.5)) + (p3.pandemic.age.inla+ggtitle('INLA')+ylim(0.8,1.5))
+
+```
 
 excess deaths and LE
 
