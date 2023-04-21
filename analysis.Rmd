@@ -133,9 +133,24 @@ b1 <- a3 %>%
          raw_prob_death= N_deaths/pop,) %>% 
   ungroup() %>%
   group_by(agey) %>%
-  mutate(t=row_number(), agey2=agey, agey3=agey)
+  mutate(t=row_number(), agey2=agey, agey3=agey) %>%
+  ungroup() %>%
+  arrange(year, qtr,pandemic_period, agey )
 
-mod.test <- glm(N_deaths ~ offset(log.offset) +agey, data=b1, family='poisson')
+
+
+# b1 <- a3 %>%
+#   mutate(qtr=as.factor(quarter(date))) %>%
+#   group_by(year,month,qtr,pandemic_period, agey) %>%
+#     summarize(N_deaths=sum(N_deaths), pop=sum(pop.interpol)) %>% 
+#   ungroup() %>%
+#   group_by(year,qtr,pandemic_period, agey) %>%
+#   summarize(N_deaths=sum(N_deaths), pop=mean(pop)) %>% # for the quarters, take mean so don't double count people
+#   mutate(log.offset=log(pop/100000), raw_prob_death= N_deaths/pop)
+
+
+
+
 ```
 
   
@@ -143,7 +158,9 @@ mod.test <- glm(N_deaths ~ offset(log.offset) +agey, data=b1, family='poisson')
 ```{r}
 #run the model
 source('./R/inla_mod.R')
+```
 
+```{r}
 # Extract fitted values
 b1$pred1 <- inla.out$summary.fitted.values[,"mean"]
 
@@ -196,12 +213,13 @@ summary(inla.out)$hyperpar
 ```
 
 
-trouble with epislon an dbeta corr
+trouble with epsi lon an dbeta corr
 ```{r}
 posterior_samples.all <- readRDS( './Results/posteriors.rds')
 
 #post1.summary<-summary(posterior_samples)
 #post_means<-colMeans(posterior_samples.all)
+
 post_means<-apply(posterior_samples.all, 2, mean)
 sample.labs<-names(post_means)
 ci<-t(hdi(posterior_samples.all, credMass = 0.95))
@@ -210,6 +228,7 @@ ci<-matrix(ci, ncol=2)
 row.names(ci)<-sample.labs
 #post_means<-sprintf("%.1f",round(post_means,1))
 names(post_means)<-sample.labs
+
 indices <- str_extract_all(names(post_means), "(?<=\\[).+?(?=\\])")
 rep1 <- sapply(indices, function(x) identical(x, character(0))) #is it missing ie character(0)
 indices[which(rep1==1)] <- '999'
@@ -225,6 +244,13 @@ post_delta<- as.data.frame(combined[grep('delta',names(post_means)),]) %>%
 
 post_epsilon<- as.data.frame(combined[grep('epsilon',names(post_means)),]) %>%
   filter(index_n<=101)
+
+taus<- as.data.frame(combined[grep('tau',names(post_means)),]) 
+taus
+
+int<- as.data.frame(combined[grep('int',names(post_means)),]) 
+int
+
 
 post_baseline_prob<- as.data.frame(combined[grep('baseline_prob',names(post_means)),]) 
 
@@ -295,10 +321,10 @@ matplot(post_beta_samps[,1:1000], type='l', col=rgb(0,0,0, alpha=0.1))
 ```{r}
 
 
-(p1.age.jags+ggtitle('JAGS') + ylim(-8,6)) + (p1.age.inla+ggtitle('INLA')+ ylim(-8,6))
+(p1.age.jags+ggtitle('JAGS') + ylim(0,10)) + (p1.age.inla+ggtitle('INLA')+ ylim(0,10))
 
 #NOTE DIFFERENT SCALE HERE
-(p2.time.age.jags+ggtitle('JAGS') +ylim(0.1,50)) + (p2.time.age.inla+ggtitle('INLA')+ylim(0.98,1.03))
+(p2.time.age.jags+ggtitle('JAGS') +ylim(0.98,1.03)) + (p2.time.age.inla+ggtitle('INLA')+ylim(0.98,1.03))
 
 (p3.pandemic.age.jags+ggtitle('JAGS') +ylim(0.8,1.5)) + (p3.pandemic.age.inla+ggtitle('INLA')+ylim(0.8,1.5))
 

@@ -1,4 +1,4 @@
-formula1 <- N_deaths ~  1 + #intercept
+formula1 <- N_deaths ~  0 + #intercept
   f(agey,model = "ar1", hyper = list(theta1 = list(prior = "loggamma", param = c(3, 2))))+  #age-specific intercept
   f(agey2,t,model = "ar1", hyper = list(theta1 = list(prior = "loggamma", param = c(3, 2)))) +   #age-varying effect for time
   f(agey3,pandemic_period,model = "ar1", hyper = list(theta1 = list(prior = "loggamma", param = c(3, 2))))+  #age-varying effect for pandemic
