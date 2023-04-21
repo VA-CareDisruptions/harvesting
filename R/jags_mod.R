@@ -6,13 +6,12 @@ for(t in 1:N_times){
   N_deaths[t] ~ dnegbin(prob[t],r)
   prob[t]<- r/(r+lambda[t])
   
-  #N_deaths[t] ~ dpois(lambda[t])
   
   log(lambda[t]) <- ( int  + 
-  log.offset[t] + #offset
-  beta[agey[t]+1] + #age-specific intercept
-  pandemic[t]*delta[agey[t]+1] + #age specific pandemic effect 
-  epsilon[agey[t]+1]*t #age specific trend
+          log.offset[t] + #offset
+          beta[agey[t]+1] + #age-specific intercept
+          pandemic[t]*delta[agey[t]+1] + #age specific pandemic effect 
+          epsilon[agey[t]+1]*(t - N_times/2)/N_times #age specific trend
   )
 
 }
@@ -33,7 +32,7 @@ for(t in 1:N_times){
     
   epsilon[1] ~ dnorm(0, (1-rho3^2)*tau.epsilon)
     for(i in 2:101){
-      epsilon[i] ~ dnorm(rho2*epsilon[i-1], tau.epsilon) #AR(1) model
+      epsilon[i] ~ dnorm(rho3*epsilon[i-1], tau.epsilon) #AR(1) model
   }
   
    int ~ dnorm(0, 1e-4)

@@ -147,7 +147,7 @@ source('./R/inla_mod.R')
 # Extract fitted values
 b1$pred1 <- inla.out$summary.fitted.values[,"mean"]
 
-ggplot(b1, aes(x=agey, y=pred1, group=t))+
+p0.fitted <- ggplot(b1, aes(x=agey, y=log(pred1/pop), group=t, col=t))+
   geom_line()+
   theme_classic()
 
@@ -196,6 +196,7 @@ summary(inla.out)$hyperpar
 ```
 
 
+trouble with epislon an dbeta corr
 ```{r}
 posterior_samples.all <- readRDS( './Results/posteriors.rds')
 
@@ -270,7 +271,7 @@ p2.time.age.jags <- ggplot(post_epsilon, aes(x=index_n, y=exp(post_means))) +
     xlab('Age (years)') +
   geom_hline(yintercept=1)+
   ylab('RR per quarter')
-
+p2.time.age.jags
 
 p3.pandemic.age.jags <-  ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
   theme_classic() +
@@ -284,13 +285,20 @@ p3.pandemic.age.jags <-  ggplot(post_delta, aes(x=index_n, y=exp(post_means))) +
 p3.pandemic.age.jags
 ```
 
+
+```{r}
+post_beta_samps <-  t(posterior_samples.all[,grep('delta',colnames(posterior_samples.all))])
+
+matplot(post_beta_samps[,1:1000], type='l', col=rgb(0,0,0, alpha=0.1))
+```
+#3 Direct comparison of INLA and JAGS
 ```{r}
 
 
-(p1.age.jags+ggtitle('JAGS')) + (p1.age.inla+ggtitle('INLA'))
+(p1.age.jags+ggtitle('JAGS') + ylim(-8,6)) + (p1.age.inla+ggtitle('INLA')+ ylim(-8,6))
 
 #NOTE DIFFERENT SCALE HERE
-(p2.time.age.jags+ggtitle('JAGS') +ylim(0.9998,1.0003)) + (p2.time.age.inla+ggtitle('INLA')+ylim(0.98,1.03))
+(p2.time.age.jags+ggtitle('JAGS') +ylim(0.1,50)) + (p2.time.age.inla+ggtitle('INLA')+ylim(0.98,1.03))
 
 (p3.pandemic.age.jags+ggtitle('JAGS') +ylim(0.8,1.5)) + (p3.pandemic.age.inla+ggtitle('INLA')+ylim(0.8,1.5))
 
