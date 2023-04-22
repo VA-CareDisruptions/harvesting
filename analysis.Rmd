@@ -252,7 +252,7 @@ int<- as.data.frame(combined[grep('int',names(post_means)),])
 int
 
 
-post_baseline_prob<- as.data.frame(combined[grep('baseline_prob',names(post_means)),]) 
+post_baseline_prob<- post_beta
 
 # ggplot(post_beta, aes(x=index_n, y=exp(post_means))) +
 #   theme_classic() +
@@ -317,7 +317,8 @@ post_beta_samps <-  t(posterior_samples.all[,grep('delta',colnames(posterior_sam
 
 matplot(post_beta_samps[,1:1000], type='l', col=rgb(0,0,0, alpha=0.1))
 ```
-#3 Direct comparison of INLA and JAGS
+
+## Direct comparison of INLA and JAGS
 ```{r}
 
 
@@ -333,9 +334,11 @@ matplot(post_beta_samps[,1:1000], type='l', col=rgb(0,0,0, alpha=0.1))
 excess deaths and LE
 
 full posterior estimates with uncertainty
+
+
 ```{r, fig.width=8, fig.height=3, eval=F}
 
-post_rate_death <- exp(baseline_prob_post)/100000 #quarterly rate
+post_rate_death <- exp(baseline_prob_post)/100000 #quarterly rate  ##NOTE NEED TO CHANGE THIS TO BE BETA BECAUSE BASELINE_PROB_POST NOT ESTIMATED NOW
 
 delta_post <- posterior_samples.all[,grep('delta',colnames(posterior_samples.all))] %>%
   reshape2::melt() %>%
@@ -544,6 +547,9 @@ life_expect_birth <-  life_table %>%
 plot(life_table$prob_death_cond, type='l' ,bty='l')
 points(life_table$prob_death_cond_pandemic, type='l', col='red', lty=2)
 
+plot(life_table$prob_death_cond, type='l' ,bty='l')
+points(life_table$prob_death_cond_pandemic, type='l', col='red', lty=2)
+
 #Unconditional probability of dying by age; by definition, if shift earlier, fewer people will die later
 p1 <-life_table %>%
   filter(agey<100) %>%
@@ -612,6 +618,16 @@ ggplot( aes(x=yearN, y=N_deaths_expected, group=age_death, color=age_death)) +
   theme_classic()
 
 
+surv_pop_single_year <- m.long %>%
+  arrange(initial_age, yearN) %>%
+  group_by(initial_age) %>%
+  mutate(cum_deaths= cumsum(N_deaths_expected),
+         surv_pop = pop - cum_deaths)
+  
+ggplot(surv_pop, aes(x=yearN, y=surv_pop, group=initial_age , col=initial_age)) +
+  geom_line() +
+  theme_classic()
+  
 
 #MODIFIED m matrix for pandemic year
 
@@ -664,7 +680,7 @@ m.long.pandemic <- rev.m.matrix(m_pandemic)  %>%
 
 #Plot
 p1 <- m.long.pandemic %>% 
-  filter( yearN<=10 & agec %in% c(2,3,4,5)) %>%
+  filter( yearN<=150 & agec %in% c(2,3,4,5)) %>%
 ggplot( aes(x=yearN, y=N_deaths_expected_Post_pand) ) +
   geom_line(col='red')+
   geom_line(aes(x=yearN, y=N_deaths_expected), col='gray',lty=2) +
@@ -673,6 +689,46 @@ ggplot( aes(x=yearN, y=N_deaths_expected_Post_pand) ) +
   facet_wrap(~agec, scales='free', nrow=1)
 
 p1
+```
+
+## Change in Prevalent population size in each year
+
+```{r}
+surv_pop_pandemic <-  rev.m.matrix(m_pandemic)  %>%
+  mutate("N_deaths_expected_pandemic" = uncond_prob * pop ) %>%
+  arrange(initial_age, yearN) %>%
+  group_by(initial_age) %>%
+  mutate(cum_deaths_pandemic= cumsum(N_deaths_expected_pandemic),
+         surv_pop_pandemic = pop - cum_deaths_pandemic) %>%
+  select(surv_pop_pandemic, initial_age, yearN) %>%
+  left_join(surv_pop_single_year, by=c('initial_age', 'yearN')) %>%
+    select(surv_pop_pandemic,surv_pop, initial_age, yearN) %>%
+  mutate( current_age = initial_age + yearN ,
+    agec =if_else(current_age>=0 & current_age<18,1, 
+                        if_else(current_age>=18 & current_age<40,2,
+                        if_else(current_age>=40 & current_age<65,3,
+                        if_else(current_age>=65 & current_age<85,4,
+                        if_else(current_age>=85 & current_age<=100,5, 999)))))) %>%
+  group_by(agec, yearN) %>%
+  summarize(surv_pop_pandemic=sum(surv_pop_pandemic), surv_pop=sum(surv_pop) , num=n()) %>%
+  filter(  (agec==2& num==22) | (agec==3& num==25) | (agec==4& num==20) | (agec==5& num==16)   ) %>%
+  mutate(proportion_lower_than_expected= surv_pop_pandemic/surv_pop  )
+
+
+ggplot(surv_pop_pandemic, aes(x=yearN, y=surv_pop )) +
+  geom_line() +
+  geom_line(aes(x=yearN, y=surv_pop_pandemic), color='red', lty=2)+
+  theme_classic() +
+  facet_wrap(~agec, scales='free' )
+
+ggplot(surv_pop_pandemic, aes(x=yearN, y=proportion_lower_than_expected )) +
+  geom_line() +
+  theme_classic() +
+  facet_wrap(~agec, scales='free_y' ) +
+  xlab('Elapsed time since pandemic') +
+  ggtitle("Proportion of population missing in the age group")
+
+
 
 
 ```
